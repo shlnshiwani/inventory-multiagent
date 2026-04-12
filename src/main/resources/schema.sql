@@ -1,0 +1,4 @@
+-- DDL is managed entirely by Hibernate (spring.jpa.hibernate.ddl-auto=create-drop).
+-- This file is intentionally empty.
+-- spring.jpa.defer-datasource-initialization=true ensures Hibernate creates
+-- all tables from @Entity classes BEFORE data.sql runs.

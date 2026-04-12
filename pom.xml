@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+         http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!-- ── Spring Boot parent provides dependency management + plugin defaults ── -->
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.5.13</version>
+        <relativePath/>
+    </parent>
+
+    <groupId>com.multiagent</groupId>
+    <artifactId>inventory-multiagent</artifactId>
+    <version>1.0.0</version>
+    <packaging>jar</packaging>
+
+    <name>Inventory Multi-Agent System</name>
+    <description>
+        Multi-agent inventory management using Spring Boot 3.5, LangChain4j 1.13,
+        LangGraph4j 1.8.11, Gemini API, H2, and Resilience4j.
+    </description>
+
+    <properties>
+        <java.version>21</java.version>
+        <langchain4j.version>1.13.0</langchain4j.version>
+        <langchain4j.beta.version>1.13.0-beta23</langchain4j.beta.version>
+        <langgraph4j.version>1.8.11</langgraph4j.version>
+    </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <!-- LangChain4j BOM — manages all dev.langchain4j module versions -->
+            <dependency>
+                <groupId>dev.langchain4j</groupId>
+                <artifactId>langchain4j-bom</artifactId>
+                <version>${langchain4j.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <dependencies>
+
+        <!-- ── Spring Boot starters ── -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter</artifactId>
+        </dependency>
+
+        <!-- Spring Data JPA + Hibernate -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+
+        <!-- AOP is required for Resilience4j annotation-based interception -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-aop</artifactId>
+        </dependency>
+
+        <!-- H2 in-memory database -->
+        <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
+        <!-- ── LangChain4j ── -->
+
+        <!-- Core library (version from BOM) -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j</artifactId>
+        </dependency>
+
+        <!-- Spring Boot starter — enables @AiService scanning -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-spring-boot-starter</artifactId>
+            <version>${langchain4j.beta.version}</version>
+        </dependency>
+
+        <!-- Google AI Gemini model integration -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-google-ai-gemini</artifactId>
+        </dependency>
+
+        <!-- Google AI Gemini Spring Boot auto-configuration -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-google-ai-gemini-spring-boot-starter</artifactId>
+            <version>${langchain4j.beta.version}</version>
+        </dependency>
+
+        <!-- ── LangGraph4j 1.8.11 — state-graph agent orchestration ── -->
+        <!-- groupId is org.bsc.langgraph4j (NOT io.github.bsorrentino) -->
+        <dependency>
+            <groupId>org.bsc.langgraph4j</groupId>
+            <artifactId>langgraph4j-core</artifactId>
+            <version>${langgraph4j.version}</version>
+        </dependency>
+
+        <!-- LangChain4j ↔ LangGraph4j integration utilities -->
+        <dependency>
+            <groupId>org.bsc.langgraph4j</groupId>
+            <artifactId>langgraph4j-langchain4j</artifactId>
+            <version>${langgraph4j.version}</version>
+        </dependency>
+
+        <!-- ── Resilience4j — Spring Boot 3 integration ── -->
+        <!--
+            spring-boot-starter-parent manages resilience4j-core/*-retry/*-circuitbreaker
+            but NOT resilience4j-spring-boot3, so we pin it explicitly.
+        -->
+        <dependency>
+            <groupId>io.github.resilience4j</groupId>
+            <artifactId>resilience4j-spring-boot3</artifactId>
+            <version>2.2.0</version>
+        </dependency>
+
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!-- Spring Boot repackage → executable fat-jar -->
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+
+</project>
