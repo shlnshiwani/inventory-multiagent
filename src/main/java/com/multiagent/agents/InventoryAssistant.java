@@ -1,6 +1,5 @@
 package com.multiagent.agents;
 
-import com.multiagent.tools.InventoryTools;
 import dev.langchain4j.service.SystemMessage;
 import dev.langchain4j.service.UserMessage;
 import dev.langchain4j.service.spring.AiService;
@@ -12,7 +11,9 @@ import dev.langchain4j.service.spring.AiServiceWiringMode;
  * Spring auto-wires the configured {@code ChatModel} and {@code ChatMemoryProvider}
  * beans. Tools are wired explicitly to {@link InventoryTools} only.
  */
-@AiService(wiringMode = AiServiceWiringMode.EXPLICIT, tools = {InventoryTools.class})
+@AiService(wiringMode = AiServiceWiringMode.EXPLICIT,
+           tools = {"inventoryTools"},
+           chatMemoryProvider = "chatMemoryProvider")
 public interface InventoryAssistant {
 
     @SystemMessage("""

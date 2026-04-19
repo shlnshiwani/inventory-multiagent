@@ -114,8 +114,9 @@ public class DemoRunner implements CommandLineRunner {
             ║         Inventory Multi-Agent System  —  v1.0.0                     ║
             ║  Spring Boot 3.5  ·  LangChain4j 1.13  ·  LangGraph4j 1.8.11      ║
             ║  Gemini 2.0 Flash  ·  H2  ·  Resilience4j  ·  Java 21  ·  Maven   ║
-            ║  Agents: Inventory · Analytics · Report  ·  Tools: 7               ║
-            ║  Execution tracking: agent_executions table (input/output per call) ║
+            ║  Agents: Inventory → Analytics → Report  (sequential)              ║
+            ║  Critic: scores each agent 1-10, retries up to 2× if score < 7    ║
+            ║  Execution tracking: agent_executions (input/output + critic rows)  ║
             ╚══════════════════════════════════════════════════════════════════════╝
             """);
     }

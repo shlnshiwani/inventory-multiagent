@@ -1,6 +1,5 @@
 package com.multiagent.agents;
 
-import com.multiagent.tools.ReportTools;
 import dev.langchain4j.service.SystemMessage;
 import dev.langchain4j.service.UserMessage;
 import dev.langchain4j.service.spring.AiService;
@@ -9,10 +8,12 @@ import dev.langchain4j.service.spring.AiServiceWiringMode;
 /**
  * LangChain4j declarative AI service for the Report Agent.
  *
- * Wired exclusively with {@link ReportTools} (T6, T7).
+ * Wired exclusively with reportTools (T6, T7).
  * Receives a pre-built prompt containing shared context from all prior agents.
  */
-@AiService(wiringMode = AiServiceWiringMode.EXPLICIT, tools = {ReportTools.class})
+@AiService(wiringMode = AiServiceWiringMode.EXPLICIT,
+           tools = {"reportTools"},
+           chatMemoryProvider = "chatMemoryProvider")
 public interface ReportAssistant {
 
     @SystemMessage("""

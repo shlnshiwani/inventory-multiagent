@@ -43,7 +43,8 @@ ai/
     ├── model/                          Lightweight domain records (DTOs)
     │   ├── Product.java                record(id,name,category,price,quantity)
     │   ├── Report.java                 record(id,title,content,createdAt)
-    │   └── AgentExecution.java         record(id,sessionId,agentName,iteration,input,output,executedAt)
+    │   ├── AgentExecution.java         record(id,sessionId,agentName,iteration,input,output,executedAt)
+    │   └── CriticResult.java           record(int score, String feedback) — Critic Agent output
     ├── entity/                         JPA @Entity classes (Hibernate maps these to tables)
     │   ├── ProductEntity.java          @Entity @Table(products)
     │   ├── ReportEntity.java           @Entity @Table(reports) — @CreationTimestamp
@@ -62,13 +63,17 @@ ai/
     │   ├── AnalyticsTools.java         @Component — Tools 4,5
     │   └── ReportTools.java            @Component — Tools 6,7
     ├── agents/
-    │   ├── InventoryAgent.java         @Service — process(task,sessionId,iteration)
-    │   ├── AnalyticsAgent.java         @Service — process(task,sessionId,iteration)
-    │   └── ReportAgent.java            @Service — process(task,sessionId,iteration)
+    │   ├── InventoryAssistant.java     @AiService(EXPLICIT, tools=inventoryTools)
+    │   ├── AnalyticsAssistant.java     @AiService(EXPLICIT, tools=analyticsTools+inventoryTools)
+    │   ├── ReportAssistant.java        @AiService(EXPLICIT, tools=reportTools)
+    │   ├── CriticAssistant.java        @AiService(EXPLICIT, no tools) — stateless evaluator
+    │   ├── InventoryAgent.java         @Service — CB/retry/logging wrapper
+    │   ├── AnalyticsAgent.java         @Service — CB/retry/logging wrapper
+    │   ├── ReportAgent.java            @Service — CB/retry/logging wrapper
+    │   └── CriticAgent.java            @Service — evaluate(agentName,output,task,session,iter)
     ├── graph/
-    │   ├── WorkflowState.java          extends AgentState — sessionId + task + history + ...
-    │   ├── SupervisorNode.java         @Component implements NodeAction<WorkflowState>
-    │   └── MultiAgentGraph.java        @Component — builds graph, generates sessionId per run
+    │   ├── WorkflowState.java          extends AgentState — sessionId, task, attempts, criticScore/Feedback
+    │   └── MultiAgentGraph.java        @Component — sequential graph with critic gates
     └── runner/
         └── DemoRunner.java             CommandLineRunner — runs demo + prints DB execution log
 ```
@@ -146,9 +151,9 @@ String latestAnalytics = executionService.getLatestOutput(sessionId, "AnalyticsA
 // Returns the most recent output from a specific agent
 ```
 
-The **Report Agent** is wired to use `getSharedContext(sessionId)` as its prompt
-context (sourced from DB), so it synthesises ALL prior agents' logged outputs —
-not just the in-memory state — when writing its final report.
+The **Report Agent** is wired to use `getLatestOutput(sessionId, agentName)` for each
+prior agent (Inventory, Analytics) so its prompt contains only specialist outputs —
+not the critic evaluation rows which are also stored in the same table.
 
 ### Useful SQL to inspect a run
 
@@ -182,18 +187,24 @@ FROM agent_executions GROUP BY session_id ORDER BY started DESC;
 
 ## Agents
 
-| Agent | Class constant | Tools | process() signature |
-|-------|---------------|-------|---------------------|
-| Inventory | `InventoryAgent.NAME` | T1 T2 T3 | `process(task, sessionId, iteration)` |
-| Analytics | `AnalyticsAgent.NAME` | T3 T4 T5 | `process(task, sessionId, iteration)` |
-| Report | `ReportAgent.NAME` | T6 T7 | `process(task, sessionId, iteration)` |
+| Agent | Class constant | Assistant interface | Tools | process() signature |
+|-------|---------------|-------------------|-------|---------------------|
+| Inventory | `InventoryAgent.NAME` | `InventoryAssistant` | T1 T2 T3 | `process(task, sessionId, iteration)` |
+| Analytics | `AnalyticsAgent.NAME` | `AnalyticsAssistant` | T3 T4 T5 | `process(task, sessionId, iteration)` |
+| Report | `ReportAgent.NAME` | `ReportAssistant` | T6 T7 | `process(task, sessionId, iteration)` |
+| Critic | `CriticAgent.NAME` | `CriticAssistant` | none | `evaluate(agentName, output, task, sessionId, iter)` |
 
-Each agent:
-- `@Service` with inner `AiServices` interface (`@SystemMessage` + `@UserMessage`)
-- Builds `AiServices` proxy in `@PostConstruct`: `AiServices.builder().chatModel(llm).tools(...).build()`
+Each specialist agent (`*Agent.java`):
+- `@Service` that injects a `@AiService` interface (Spring wires ChatModel + tools)
 - Annotates `process()` with `@CircuitBreaker(name="gemini")` + `@Retry(name="gemini")`
 - Has `fallback(task, sessionId, iteration, Throwable)` — also logs to DB
 - `AgentExecutionService` injected for input/output logging
+
+`CriticAgent`:
+- Calls `CriticAssistant.evaluate()` (no tools, no memory — stateless per evaluation)
+- Parses `SCORE: N` and `FEEDBACK: ...` from LLM response
+- Logs as `"CriticAgent[<agentName>]"` in DB
+- `PASS_THRESHOLD = 7`; graph allows max 2 attempts per agent
 
 ## AgentExecutionService API
 
@@ -219,25 +230,32 @@ String getSummary(String sessionId)
 
 ## LangGraph4j state graph
 
+Sequential flow — each agent is followed by a Critic gate (max 2 attempts):
+
 ```
-START → supervisor ──[inventory]→ InventoryAgent ──┐
-              │                                      ├→ supervisor → …
-              │──[analytics]→ AnalyticsAgent ────────┤
-              │──[report]───→ ReportAgent ────────────┘
-              └──[END]──────────────────────────────→ END
+START → inventory → critic-inventory ──┬─(pass/max)→ analytics → critic-analytics ──┬─→ report → critic-report ──┬─→ END
+                            └─(retry)──┘                               └─(retry)──────┘               └─(retry)──┘
 ```
+
+Pass condition: `score ≥ 7 OR attempt ≥ 2` (whichever comes first).
 
 **WorkflowState** fields & channels:
 
 | Field | Channel | Default | Purpose |
 |-------|---------|---------|---------|
 | `sessionId` | `Channels.base(()→"")` | `""` | UUID per run — links DB rows |
-| `task` | `Channels.base(()→"")` | `""` | original user task |
-| `route` | `Channels.base(()→ROUTE_INVENTORY)` | `"inventory"` | next agent |
-| `agentOutput` | `Channels.base(()→"")` | `""` | last agent's output |
-| `history` | `Channels.appender(ArrayList::new)` | `[]` | in-memory accumulation |
-| `iteration` | `Channels.base(()→0)` | `0` | supervisor decision count |
-| `done` | `Channels.base(()→false)` | `false` | termination flag |
+| `task` | `Channels.base(()→"")` | `""` | original user task (immutable) |
+| `agentOutput` | `Channels.base(()→"")` | `""` | last specialist agent response |
+| `history` | `Channels.appender(ArrayList::new)` | `[]` | accumulated agent output list |
+| `iteration` | `Channels.base(()→0)` | `0` | incremented by each critic node |
+| `inventoryAttempt` | `Channels.base(()→0)` | `0` | # times InventoryAgent invoked |
+| `analyticsAttempt` | `Channels.base(()→0)` | `0` | # times AnalyticsAgent invoked |
+| `reportAttempt` | `Channels.base(()→0)` | `0` | # times ReportAgent invoked |
+| `criticScore` | `Channels.base(()→0)` | `0` | last critic score (1–10) |
+| `criticFeedback` | `Channels.base(()→"")` | `""` | last critic one-sentence feedback |
+
+> `criticFeedback` is shared but safe: each agent node only reads it when its own
+> `*Attempt > 0` (retry), so first runs never see stale feedback from a prior agent's critic.
 
 ## LangGraph4j 1.8.11 API (correct usage)
 
@@ -268,7 +286,7 @@ Retry `gemini`: max 3 attempts, 2s wait, exponential backoff ×2.
 
 1. Add `@Tool` method to appropriate `*Tools.java` (use `@P` for parameter docs)
 2. Add DB method to `InventoryRepository` if it reads/writes the DB
-3. Register the tool in the agent's `@PostConstruct` `.tools(...)` call
+3. Add the bean name string to the relevant `@AiService(tools = {"beanName"})` interface
 4. Update the Tool table in this file
 
 ## How to add a new agent
@@ -302,9 +320,12 @@ Retry `gemini`: max 3 attempts, 2s wait, exponential backoff ×2.
 | InventoryAgent (with DB logging) | ✅ |
 | AnalyticsAgent (with DB logging) | ✅ |
 | ReportAgent (with DB logging + shared context) | ✅ |
-| WorkflowState (sessionId channel) | ✅ |
-| SupervisorNode | ✅ |
-| MultiAgentGraph (sessionId per run) | ✅ |
+| @AiService declarative interfaces (all 3 agents) | ✅ |
+| CriticAssistant (@AiService, no tools, stateless) | ✅ |
+| CriticAgent (score parser, DB logging, PASS_THRESHOLD=7) | ✅ |
+| WorkflowState (sequential fields: *Attempt, criticScore/Feedback) | ✅ |
+| SupervisorNode | ❌ removed — replaced by sequential graph |
+| MultiAgentGraph (sequential + critic gates, max 2 attempts) | ✅ |
 | DemoRunner (execution log display) | ✅ |
 | Resilience4j @CircuitBreaker + @Retry | ✅ |
 | Gemini auto-config via SB starter | ✅ |
